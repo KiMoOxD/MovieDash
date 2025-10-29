@@ -1,7 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import Layout from './layouts/Layout'
 import Movies from './pages/Movies'
-import About from './pages/About'
 import NotFound from './pages/NotFound'
 import Overview from './pages/Overview'
 import Series from './pages/Series'
