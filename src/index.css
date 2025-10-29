@@ -1,0 +1,12 @@
+@import "tailwindcss";
+
+/* Minimal app-level base overrides (kept small; prefer Tailwind utilities in components) */
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
