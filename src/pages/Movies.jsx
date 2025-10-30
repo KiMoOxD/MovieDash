@@ -1,39 +1,17 @@
 // Movies.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FaPencilAlt, FaTrash } from 'react-icons/fa';
 import Modal from '../components/Modal';
+import moviesApi from '../api/movies';
+import { useToast } from '../contexts/ToastContext';
 
 export default function Movies() {
-  // Mock data - replace with API later
-  const [movies, setMovies] = useState([
-    {
-      id: 1,
-      title: "The Dark Knight",
-      description: "Batman raises the stakes in his war on crime with the help of Lt. Jim Gordon and District Attorney Harvey Dent.",
-      type: "Action",
-      releaseYear: "2008",
-      posterUrl: "https://example.com/dark-knight.jpg",
-      movieUrl: "https://example.com/dark-knight.mp4"
-    },
-    {
-      id: 2,
-      title: "Inception",
-      description: "A thief who steals corporate secrets through the use of dream-sharing technology is given the inverse task of planting an idea into the mind of a CEO.",
-      type: "Sci-Fi",
-      releaseYear: "2010",
-      posterUrl: "https://example.com/inception.jpg",
-      movieUrl: "https://example.com/inception.mp4"
-    },
-    {
-      id: 3,
-      title: "The Godfather",
-      description: "The aging patriarch of an organized crime dynasty transfers control of his clandestine empire to his reluctant son.",
-      type: "Crime",
-      releaseYear: "1972",
-      posterUrl: "https://example.com/godfather.jpg",
-      movieUrl: "https://example.com/godfather.mp4"
-    }
-  ]);
+  const [movies, setMovies] = useState([]);
+  const [loading, setLoading] = useState(false);
+  // action flags for create / update / delete
+  const [isAdding, setIsAdding] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -47,30 +25,114 @@ export default function Movies() {
     description: '',
     type: '',
     releaseYear: '2025',
-    posterUrl: 'https://example.com/poster.jpg',
-    movieUrl: 'https://example.com/movie.mp4'
+    posterURL: 'https://example.com/poster.jpg',
+    movieURL: 'https://example.com/movie.mp4'
   });
 
-  // Handlers
-  const handleAddMovie = () => {
-    const newMovie = {
-      id: movies.length + 1,
-      ...formData
-    };
-    setMovies([...movies, newMovie]);
-    setIsAddModalOpen(false);
-    resetForm();
+  // Helpers
+  const loadMovies = async () => {
+    setLoading(true);
+    try {
+      const res = await moviesApi.getAllMovies();
+      // Normalize backend keys to the front-end shape we use in the UI.
+      const data = res.data ?? res;
+      const normalized = (Array.isArray(data) ? data : []).map((m) => ({
+        // backend returns movieId, title, description, type, releaseYear, posterURL, movieURL
+        ...m,
+        posterURL: m.posterURL ?? m.posterUrl ?? m.poster ?? '',
+        movieURL: m.movieURL ?? m.movieUrl ?? m.movie ?? '',
+      }));
+      setMovies(normalized);
+    } catch (err) {
+      console.error('loadMovies error', err.response ?? err);
+      showApiErrors(err);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleEditMovie = () => {
-    setMovies(movies.map(m => m.id === currentMovie.id ? { ...m, ...formData } : m));
-    setIsEditModalOpen(false);
-    resetForm();
+  useEffect(() => {
+    loadMovies();
+  }, []);
+
+  const { addToast } = useToast();
+
+  const showApiErrors = (err) => {
+    const problems = err?.response?.data;
+    if (problems?.errors && typeof problems.errors === 'object') {
+      Object.values(problems.errors).forEach((arr) => {
+        if (Array.isArray(arr)) arr.forEach((m) => addToast(m, { type: 'error' }));
+        else addToast(String(arr), { type: 'error' });
+      });
+      return;
+    }
+    const title = problems?.title || err?.message || 'An error occurred';
+    addToast(title, { type: 'error' });
   };
 
-  const handleDeleteMovie = () => {
-    setMovies(movies.filter(m => m.id !== currentMovie.id));
-    setIsDeleteModalOpen(false);
+  // Handlers -> call backend
+  const handleAddMovie = async () => {
+    setIsAdding(true);
+    try {
+      const payload = {
+        title: formData.title,
+        description: formData.description,
+        type: formData.type,
+        releaseYear: Number(formData.releaseYear),
+        posterURL: formData.posterURL,
+        movieURL: formData.movieURL,
+      };
+      await moviesApi.addMovie(payload);
+      setIsAddModalOpen(false);
+      resetForm();
+      await loadMovies();
+    } catch (err) {
+        console.error('addMovie error', err.response ?? err);
+        showApiErrors(err);
+    }
+    finally {
+      setIsAdding(false);
+    }
+  };
+
+  const handleEditMovie = async () => {
+    if (!currentMovie) return;
+    setIsUpdating(true);
+    try {
+      const payload = {
+        title: formData.title,
+        description: formData.description,
+        type: formData.type,
+        releaseYear: Number(formData.releaseYear),
+        posterURL: formData.posterURL,
+        movieURL: formData.movieURL,
+      };
+      await moviesApi.updateMovie(currentMovie.movieId, payload);
+      setIsEditModalOpen(false);
+      resetForm();
+      await loadMovies();
+    } catch (err) {
+      console.error('updateMovie error', err.response ?? err);
+      showApiErrors(err);
+    }
+    finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handleDeleteMovie = async () => {
+    if (!currentMovie) return;
+    setIsDeleting(true);
+    try {
+      await moviesApi.deleteMovie(currentMovie.movieId);
+      setIsDeleteModalOpen(false);
+      await loadMovies();
+    } catch (err) {
+      console.error('deleteMovie error', err.response ?? err);
+      showApiErrors(err);
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const resetForm = () => {
@@ -79,8 +141,8 @@ export default function Movies() {
       description: '',
       type: '',
       releaseYear: '2025',
-      posterUrl: 'https://example.com/poster.jpg',
-      movieUrl: 'https://example.com/movie.mp4'
+      posterURL: 'https://example.com/poster.jpg',
+      movieURL: 'https://example.com/movie.mp4'
     });
   };
 
@@ -91,8 +153,8 @@ export default function Movies() {
       description: movie.description,
       type: movie.type,
       releaseYear: movie.releaseYear,
-      posterUrl: movie.posterUrl,
-      movieUrl: movie.movieUrl
+      posterURL: movie.posterURL ?? movie.posterUrl ?? movie.poster ?? '',
+      movieURL: movie.movieURL ?? movie.movieUrl ?? movie.movie ?? ''
     });
     setIsEditModalOpen(true);
   };
@@ -134,33 +196,47 @@ export default function Movies() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
-            {movies.map((movie) => (
-              <tr key={movie.id} className="hover:bg-gray-50">
-                <td className="px-3 py-4 text-xs">{movie.id}</td>
-                <td className="px-3 py-4 text-xs">{movie.title}</td>
-                <td className="px-3 py-4 text-xs truncate max-w-xs">{movie.description}</td>
-                <td className="px-3 py-4 text-xs">{movie.type}</td>
-                <td className="px-3 py-4 text-xs">{movie.releaseYear}</td>
-                <td className="px-3 py-4 text-xs truncate max-w-xs">{movie.posterUrl}</td>
-                <td className="px-3 py-4 text-xs truncate max-w-xs">{movie.movieUrl}</td>
-                <td className="px-3 py-4 text-xs">
-                  <div className="flex space-x-2">
-                    <button
-                      onClick={() => openEditModal(movie)}
-                      className="text-gray-600 hover:text-gray-900"
-                    >
-                      <FaPencilAlt />
-                    </button>
-                    <button
-                      onClick={() => openDeleteModal(movie)}
-                      className="text-red-600 hover:text-red-900"
-                    >
-                      <FaTrash />
-                    </button>
-                  </div>
+            {loading ? (
+              <tr>
+                <td colSpan={8} className="py-12 text-center">
+                  <svg className="animate-spin h-6 w-6 mx-auto text-gray-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                  </svg>
+                  <div className="text-sm text-gray-500 mt-2">Loading movies...</div>
                 </td>
               </tr>
-            ))}
+            ) : (
+              movies.map((movie) => (
+                <tr key={movie.movieId} className="hover:bg-gray-50">
+                  <td className="px-3 py-4 text-xs">{movie.movieId}</td>
+                  <td className="px-3 py-4 text-xs">{movie.title}</td>
+                  <td className="px-3 py-4 text-xs truncate max-w-xs">{movie.description}</td>
+                  <td className="px-3 py-4 text-xs">{movie.type}</td>
+                  <td className="px-3 py-4 text-xs">{movie.releaseYear}</td>
+                  <td className="px-3 py-4 text-xs truncate max-w-xs">{movie.posterURL}</td>
+                  <td className="px-3 py-4 text-xs truncate max-w-xs">{movie.movieURL}</td>
+                  <td className="px-3 py-4 text-xs">
+                    <div className="flex space-x-2">
+                      <button
+                        onClick={() => openEditModal(movie)}
+                        className="text-gray-600 hover:text-gray-900"
+                        disabled={isAdding || isUpdating || isDeleting}
+                      >
+                        <FaPencilAlt />
+                      </button>
+                      <button
+                        onClick={() => openDeleteModal(movie)}
+                        className="text-red-600 hover:text-red-900"
+                        disabled={isAdding || isUpdating || isDeleting}
+                      >
+                        <FaTrash />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
@@ -218,8 +294,8 @@ export default function Movies() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Poster URL</label>
             <input
               type="text"
-              value={formData.posterUrl}
-              onChange={(e) => setFormData({...formData, posterUrl: e.target.value})}
+              value={formData.posterURL}
+              onChange={(e) => setFormData({...formData, posterURL: e.target.value})}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="https://example.com/poster.jpg"
             />
@@ -228,8 +304,8 @@ export default function Movies() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Movie URL</label>
             <input
               type="text"
-              value={formData.movieUrl}
-              onChange={(e) => setFormData({...formData, movieUrl: e.target.value})}
+              value={formData.movieURL}
+              onChange={(e) => setFormData({...formData, movieURL: e.target.value})}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="https://example.com/movie.mp4"
             />
@@ -244,9 +320,20 @@ export default function Movies() {
           </button>
           <button
             onClick={handleAddMovie}
-            className="px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800"
+            disabled={isAdding}
+            className={`px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800 ${isAdding ? 'opacity-60 cursor-not-allowed' : ''}`}
           >
-            Create
+            {isAdding ? (
+              <span className="inline-flex items-center">
+                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                </svg>
+                Creating...
+              </span>
+            ) : (
+              'Create'
+            )}
           </button>
         </div>
       </Modal>
@@ -300,8 +387,8 @@ export default function Movies() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Poster URL</label>
             <input
               type="text"
-              value={formData.posterUrl}
-              onChange={(e) => setFormData({...formData, posterUrl: e.target.value})}
+              value={formData.posterURL}
+              onChange={(e) => setFormData({...formData, posterURL: e.target.value})}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -309,8 +396,8 @@ export default function Movies() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Movie URL</label>
             <input
               type="text"
-              value={formData.movieUrl}
-              onChange={(e) => setFormData({...formData, movieUrl: e.target.value})}
+              value={formData.movieURL}
+              onChange={(e) => setFormData({...formData, movieURL: e.target.value})}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -324,9 +411,20 @@ export default function Movies() {
           </button>
           <button
             onClick={handleEditMovie}
-            className="px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800"
+            disabled={isUpdating}
+            className={`px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800 ${isUpdating ? 'opacity-60 cursor-not-allowed' : ''}`}
           >
-            Update
+            {isUpdating ? (
+              <span className="inline-flex items-center">
+                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                </svg>
+                Updating...
+              </span>
+            ) : (
+              'Update'
+            )}
           </button>
         </div>
       </Modal>
@@ -349,9 +447,20 @@ export default function Movies() {
           </button>
           <button
             onClick={handleDeleteMovie}
-            className="px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800"
+            disabled={isDeleting}
+            className={`px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800 ${isDeleting ? 'opacity-60 cursor-not-allowed' : ''}`}
           >
-            Delete
+            {isDeleting ? (
+              <span className="inline-flex items-center">
+                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                </svg>
+                Deleting...
+              </span>
+            ) : (
+              'Delete'
+            )}
           </button>
         </div>
       </Modal>

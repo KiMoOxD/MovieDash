@@ -1,35 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FaPencilAlt, FaTrash } from 'react-icons/fa';
 import Modal from '../components/Modal'; 
+import seriesApi from '../api/series';
+import { useToast } from '../contexts/ToastContext';
 
 export default function Series() {
-  // Mock data - replace with API later
-  const [seriesList, setSeriesList] = useState([
-    {
-      id: 1,
-      title: "Breaking Bad",
-      description: "A high school chemistry teacher turned methamphetamine manufacturer.",
-      type: "Crime",
-      url: "https://example.com/breaking-bad",
-      posterUrl: "https://example.com/breaking-bad.jpg"
-    },
-    {
-      id: 2,
-      title: "Game of Thrones",
-      description: "Nine noble families fight for control over the lands of Westeros.",
-      type: "Fantasy",
-      url: "https://example.com/got",
-      posterUrl: "https://example.com/got.jpg"
-    },
-    {
-      id: 3,
-      title: "Stranger Things",
-      description: "When a young boy disappears, his mother and friends are drawn into a mystery involving secret government experiments.",
-      type: "Sci-Fi",
-      url: "https://example.com/stranger-things",
-      posterUrl: "https://example.com/stranger-things.jpg"
-    }
-  ]);
+  const [seriesList, setSeriesList] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [isAdding, setIsAdding] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Modal States
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -37,35 +17,115 @@ export default function Series() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [currentSeries, setCurrentSeries] = useState(null);
 
-  // Form state for Add/Edit
+  // Form state for Add/Edit (use backend keys)
   const [formData, setFormData] = useState({
     title: '',
     description: '',
     type: '',
     url: 'https://example.com/series',
-    posterUrl: 'https://example.com/poster.jpg'
+    posterURL: 'https://example.com/poster.jpg'
   });
 
-  // Handlers
-  const handleAddSeries = () => {
-    const newSeries = {
-      id: seriesList.length + 1,
-      ...formData
-    };
-    setSeriesList([...seriesList, newSeries]);
-    setIsAddModalOpen(false);
-    resetForm();
+  const { addToast } = useToast();
+
+  const showApiErrors = (err) => {
+    const problems = err?.response?.data;
+    if (problems?.errors && typeof problems.errors === 'object') {
+      Object.values(problems.errors).forEach((arr) => {
+        if (Array.isArray(arr)) arr.forEach((m) => addToast(m, { type: 'error' }));
+        else addToast(String(arr), { type: 'error' });
+      });
+      return;
+    }
+    const title = problems?.title || err?.message || 'An error occurred';
+    addToast(title, { type: 'error' });
   };
 
-  const handleEditSeries = () => {
-    setSeriesList(seriesList.map(s => s.id === currentSeries.id ? { ...s, ...formData } : s));
-    setIsEditModalOpen(false);
-    resetForm();
+  const loadSeries = async () => {
+    setLoading(true);
+    try {
+      const res = await seriesApi.getAllSeries();
+      const data = res.data ?? res;
+      const normalized = (Array.isArray(data) ? data : []).map((s) => ({
+        ...s,
+        seriesId: s.seriesId ?? s.id ?? s.seriesID ?? '',
+        posterURL: s.posterURL ?? s.posterUrl ?? s.poster ?? ''
+      }));
+      setSeriesList(normalized);
+    } catch (err) {
+      console.error('loadSeries error', err.response ?? err);
+      showApiErrors(err);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleDeleteSeries = () => {
-    setSeriesList(seriesList.filter(s => s.id !== currentSeries.id));
-    setIsDeleteModalOpen(false);
+  useEffect(() => {
+    loadSeries();
+  }, []);
+
+  // Handlers -> call backend
+  const handleAddSeries = async () => {
+    setIsAdding(true);
+    try {
+      const payload = {
+        title: formData.title,
+        description: formData.description,
+        type: formData.type,
+        url: formData.url,
+        posterURL: formData.posterURL,
+      };
+      await seriesApi.addSeries(payload);
+      setIsAddModalOpen(false);
+      resetForm();
+      addToast('Series created', { type: 'success' });
+      await loadSeries();
+    } catch (err) {
+      console.error('addSeries error', err.response ?? err);
+      showApiErrors(err);
+    } finally {
+      setIsAdding(false);
+    }
+  };
+
+  const handleEditSeries = async () => {
+    if (!currentSeries) return;
+    setIsUpdating(true);
+    try {
+      const payload = {
+        title: formData.title,
+        description: formData.description,
+        type: formData.type,
+        url: formData.url,
+        posterURL: formData.posterURL,
+      };
+  await seriesApi.updateSeries(currentSeries.seriesId, payload);
+      setIsEditModalOpen(false);
+      resetForm();
+      addToast('Series updated', { type: 'success' });
+      await loadSeries();
+    } catch (err) {
+      console.error('updateSeries error', err.response ?? err);
+      showApiErrors(err);
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handleDeleteSeries = async () => {
+    if (!currentSeries) return;
+    setIsDeleting(true);
+    try {
+  await seriesApi.deleteSeries(currentSeries.seriesId);
+      setIsDeleteModalOpen(false);
+      addToast('Series deleted', { type: 'success' });
+      await loadSeries();
+    } catch (err) {
+      console.error('deleteSeries error', err.response ?? err);
+      showApiErrors(err);
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const resetForm = () => {
@@ -74,7 +134,7 @@ export default function Series() {
       description: '',
       type: '',
       url: 'https://example.com/series',
-      posterUrl: 'https://example.com/poster.jpg'
+      posterURL: 'https://example.com/poster.jpg'
     });
   };
 
@@ -85,7 +145,7 @@ export default function Series() {
       description: seriesItem.description,
       type: seriesItem.type,
       url: seriesItem.url,
-      posterUrl: seriesItem.posterUrl
+      posterURL: seriesItem.posterURL ?? seriesItem.posterUrl ?? seriesItem.poster ?? ''
     });
     setIsEditModalOpen(true);
   };
@@ -126,32 +186,46 @@ export default function Series() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
-            {seriesList.map((seriesItem) => (
-              <tr key={seriesItem.id} className="hover:bg-gray-50">
-                <td className="px-3 py-4 text-xs">{seriesItem.id}</td>
-                <td className="px-3 py-4 text-xs">{seriesItem.title}</td>
-                <td className="px-3 py-4 text-xs truncate max-w-xs">{seriesItem.description}</td>
-                <td className="px-3 py-4 text-xs">{seriesItem.type}</td>
-                <td className="px-3 py-4 text-xs truncate max-w-xs">{seriesItem.url}</td>
-                <td className="px-3 py-4 text-xs truncate max-w-xs">{seriesItem.posterUrl}</td>
-                <td className="px-3 py-4 text-xs">
-                  <div className="flex space-x-2">
-                    <button
-                      onClick={() => openEditModal(seriesItem)}
-                      className="text-gray-600 hover:text-gray-900"
-                    >
-                      <FaPencilAlt />
-                    </button>
-                    <button
-                      onClick={() => openDeleteModal(seriesItem)}
-                      className="text-red-600 hover:text-red-900"
-                    >
-                      <FaTrash />
-                    </button>
-                  </div>
+            {loading ? (
+              <tr>
+                <td colSpan={7} className="py-12 text-center">
+                  <svg className="animate-spin h-6 w-6 mx-auto text-gray-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                  </svg>
+                  <div className="text-sm text-gray-500 mt-2">Loading series...</div>
                 </td>
               </tr>
-            ))}
+            ) : (
+              seriesList.map((seriesItem) => (
+                <tr key={seriesItem.seriesId} className="hover:bg-gray-50">
+                  <td className="px-3 py-4 text-xs">{seriesItem.seriesId}</td>
+                  <td className="px-3 py-4 text-xs">{seriesItem.title}</td>
+                  <td className="px-3 py-4 text-xs truncate max-w-xs">{seriesItem.description}</td>
+                  <td className="px-3 py-4 text-xs">{seriesItem.type}</td>
+                  <td className="px-3 py-4 text-xs truncate max-w-xs">{seriesItem.url}</td>
+                  <td className="px-3 py-4 text-xs truncate max-w-xs">{seriesItem.posterURL}</td>
+                  <td className="px-3 py-4 text-xs">
+                    <div className="flex space-x-2">
+                      <button
+                        onClick={() => openEditModal(seriesItem)}
+                        className="text-gray-600 hover:text-gray-900"
+                        disabled={isAdding || isUpdating || isDeleting}
+                      >
+                        <FaPencilAlt />
+                      </button>
+                      <button
+                        onClick={() => openDeleteModal(seriesItem)}
+                        className="text-red-600 hover:text-red-900"
+                        disabled={isAdding || isUpdating || isDeleting}
+                      >
+                        <FaTrash />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
@@ -207,8 +281,8 @@ export default function Series() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Poster URL</label>
             <input
               type="text"
-              value={formData.posterUrl}
-              onChange={(e) => setFormData({...formData, posterUrl: e.target.value})}
+              value={formData.posterURL}
+              onChange={(e) => setFormData({...formData, posterURL: e.target.value})}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="https://example.com/poster.jpg"
             />
@@ -223,9 +297,20 @@ export default function Series() {
           </button>
           <button
             onClick={handleAddSeries}
-            className="px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800"
+            disabled={isAdding}
+            className={`px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800 ${isAdding ? 'opacity-60 cursor-not-allowed' : ''}`}
           >
-            Create
+            {isAdding ? (
+              <span className="inline-flex items-center">
+                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                </svg>
+                Creating...
+              </span>
+            ) : (
+              'Create'
+            )}
           </button>
         </div>
       </Modal>
@@ -277,8 +362,8 @@ export default function Series() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Poster URL</label>
             <input
               type="text"
-              value={formData.posterUrl}
-              onChange={(e) => setFormData({...formData, posterUrl: e.target.value})}
+              value={formData.posterURL}
+              onChange={(e) => setFormData({...formData, posterURL: e.target.value})}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -292,9 +377,20 @@ export default function Series() {
           </button>
           <button
             onClick={handleEditSeries}
-            className="px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800"
+            disabled={isUpdating}
+            className={`px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800 ${isUpdating ? 'opacity-60 cursor-not-allowed' : ''}`}
           >
-            Update
+            {isUpdating ? (
+              <span className="inline-flex items-center">
+                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                </svg>
+                Updating...
+              </span>
+            ) : (
+              'Update'
+            )}
           </button>
         </div>
       </Modal>
@@ -317,9 +413,20 @@ export default function Series() {
           </button>
           <button
             onClick={handleDeleteSeries}
-            className="px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800"
+            disabled={isDeleting}
+            className={`px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800 ${isDeleting ? 'opacity-60 cursor-not-allowed' : ''}`}
           >
-            Delete
+            {isDeleting ? (
+              <span className="inline-flex items-center">
+                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                </svg>
+                Deleting...
+              </span>
+            ) : (
+              'Delete'
+            )}
           </button>
         </div>
       </Modal>

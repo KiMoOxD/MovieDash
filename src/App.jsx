@@ -10,24 +10,27 @@ import Users from './pages/Users'
 import Subscriptions from './pages/Subscriptions'
 import UserSubscribtions from './pages/UserSubscribtions'
 import Settings from './pages/Settings'
+import { ToastProvider } from './contexts/ToastContext'
 
 function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<Overview />} />
-          <Route path="movies" element={<Movies />} />
-          <Route path="series" element={<Series />} />
-          <Route path="episodes" element={<Episodes />} />
-          <Route path="channels" element={<Channels />} />
-          <Route path="users" element={<Users />} />
-          <Route path="subscriptions" element={<Subscriptions />} />
-          <Route path="user-subscriptions" element={<UserSubscribtions />} />
-          <Route path="settings" element={<Settings />} />
-          <Route path="*" element={<NotFound />} />
-        </Route>
-      </Routes>
+      <ToastProvider>
+        <Routes>
+          <Route path="/" element={<Layout />}>
+            <Route index element={<Overview />} />
+            <Route path="movies" element={<Movies />} />
+            <Route path="series" element={<Series />} />
+            <Route path="episodes" element={<Episodes />} />
+            <Route path="channels" element={<Channels />} />
+            <Route path="users" element={<Users />} />
+            <Route path="subscriptions" element={<Subscriptions />} />
+            <Route path="user-subscriptions" element={<UserSubscribtions />} />
+            <Route path="settings" element={<Settings />} />
+            <Route path="*" element={<NotFound />} />
+          </Route>
+        </Routes>
+      </ToastProvider>
     </BrowserRouter>
   )
 }

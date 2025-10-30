@@ -1,38 +1,15 @@
 // Episodes.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FaPencilAlt, FaTrash } from 'react-icons/fa';
 import Modal from '../components/Modal'; 
+import episodesApi from '../api/episodes';
+import { useToast } from '../contexts/ToastContext';
 export default function Episodes() {
-  // Mock data - replace with API later
-  const [episodes, setEpisodes] = useState([
-    {
-      id: 1,
-      seriesId: 1,
-      season: "Season 1",
-      title: "Pilot",
-      description: "Walter White's life changes when he's diagnosed with cancer.",
-      url: "https://example.com/bb-s1e1.mp4",
-      posterUrl: "https://example.com/bb-s1e1.jpg"
-    },
-    {
-      id: 2,
-      seriesId: 1,
-      season: "Season 1",
-      title: "Cat's in the Bag...",
-      description: "Walt and Jesse face the aftermath of their first cook.",
-      url: "https://example.com/bb-s1e2.mp4",
-      posterUrl: "https://example.com/bb-s1e2.jpg"
-    },
-    {
-      id: 3,
-      seriesId: 2,
-      season: "Season 1",
-      title: "Winter Is Coming",
-      description: "Eddard Stark is torn between his family and an old promise.",
-      url: "https://example.com/got-s1e1.mp4",
-      posterUrl: "https://example.com/got-s1e1.jpg"
-    }
-  ]);
+  const [episodes, setEpisodes] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [isAdding, setIsAdding] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Modal States
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -40,47 +17,131 @@ export default function Episodes() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [currentEpisode, setCurrentEpisode] = useState(null);
 
-  // Form state for Add/Edit
+  // Form state for Add/Edit (use backend field names)
   const [formData, setFormData] = useState({
     seriesId: '',
-    season: 'Season 1',
+    seasonName: 'Season 1',
     title: '',
     description: '',
-    url: 'https://example.com/episode.mp4',
-    posterUrl: 'https://example.com/poster.jpg'
+    episodeURL: 'https://example.com/episode.mp4',
+    posterURL: 'https://example.com/poster.jpg'
   });
 
-  // Handlers
-  const handleAddEpisode = () => {
-    const newEpisode = {
-      id: episodes.length + 1,
-      ...formData,
-      seriesId: parseInt(formData.seriesId) // Ensure it's a number
-    };
-    setEpisodes([...episodes, newEpisode]);
-    setIsAddModalOpen(false);
-    resetForm();
+  const { addToast } = useToast();
+
+  const showApiErrors = (err) => {
+    const problems = err?.response?.data;
+    if (problems?.errors && typeof problems.errors === 'object') {
+      Object.values(problems.errors).forEach((arr) => {
+        if (Array.isArray(arr)) arr.forEach((m) => addToast(m, { type: 'error' }));
+        else addToast(String(arr), { type: 'error' });
+      });
+      return;
+    }
+    const title = problems?.title || err?.message || 'An error occurred';
+    addToast(title, { type: 'error' });
   };
 
-  const handleEditEpisode = () => {
-    setEpisodes(episodes.map(e => e.id === currentEpisode.id ? { ...e, ...formData, seriesId: parseInt(formData.seriesId) } : e));
-    setIsEditModalOpen(false);
-    resetForm();
+  const loadEpisodes = async () => {
+    setLoading(true);
+    try {
+      const res = await episodesApi.getAllEpisodes();
+      const data = res.data ?? res;
+      const normalized = (Array.isArray(data) ? data : []).map((e) => ({
+        ...e,
+        episodeId: e.episodeId ?? e.id ?? e.episodeID ?? '',
+        seriesId: e.seriesId ?? e.seriesID ?? e.series ?? '',
+        seasonName: e.seasonName ?? e.season ?? '',
+        episodeURL: e.episodeURL ?? e.url ?? '',
+        posterURL: e.posterURL ?? e.posterUrl ?? e.poster ?? ''
+      }));
+      setEpisodes(normalized);
+    } catch (err) {
+      console.error('loadEpisodes error', err.response ?? err);
+      showApiErrors(err);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleDeleteEpisode = () => {
-    setEpisodes(episodes.filter(e => e.id !== currentEpisode.id));
-    setIsDeleteModalOpen(false);
+  useEffect(() => {
+    loadEpisodes();
+  }, []);
+
+  // Handlers -> call backend
+  const handleAddEpisode = async () => {
+    setIsAdding(true);
+    try {
+      const payload = {
+        seriesId: Number(formData.seriesId),
+        seasonName: formData.seasonName,
+        title: formData.title,
+        description: formData.description,
+        posterURL: formData.posterURL,
+        episodeURL: formData.episodeURL,
+      };
+      await episodesApi.addEpisode(payload);
+      setIsAddModalOpen(false);
+      resetForm();
+      addToast('Episode created', { type: 'success' });
+      await loadEpisodes();
+    } catch (err) {
+      console.error('addEpisode error', err.response ?? err);
+      showApiErrors(err);
+    } finally {
+      setIsAdding(false);
+    }
+  };
+
+  const handleEditEpisode = async () => {
+    if (!currentEpisode) return;
+    setIsUpdating(true);
+    try {
+      const payload = {
+        seriesId: Number(formData.seriesId),
+        seasonName: formData.seasonName,
+        title: formData.title,
+        description: formData.description,
+        posterURL: formData.posterURL,
+        episodeURL: formData.episodeURL,
+      };
+  await episodesApi.updateEpisode(currentEpisode.episodeId, payload);
+      setIsEditModalOpen(false);
+      resetForm();
+      addToast('Episode updated', { type: 'success' });
+      await loadEpisodes();
+    } catch (err) {
+      console.error('updateEpisode error', err.response ?? err);
+      showApiErrors(err);
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handleDeleteEpisode = async () => {
+    if (!currentEpisode) return;
+    setIsDeleting(true);
+    try {
+  await episodesApi.deleteEpisode(currentEpisode.episodeId);
+      setIsDeleteModalOpen(false);
+      addToast('Episode deleted', { type: 'success' });
+      await loadEpisodes();
+    } catch (err) {
+      console.error('deleteEpisode error', err.response ?? err);
+      showApiErrors(err);
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const resetForm = () => {
     setFormData({
       seriesId: '',
-      season: 'Season 1',
+      seasonName: 'Season 1',
       title: '',
       description: '',
-      url: 'https://example.com/episode.mp4',
-      posterUrl: 'https://example.com/poster.jpg'
+      episodeURL: 'https://example.com/episode.mp4',
+      posterURL: 'https://example.com/poster.jpg'
     });
   };
 
@@ -88,11 +149,11 @@ export default function Episodes() {
     setCurrentEpisode(episode);
     setFormData({
       seriesId: episode.seriesId.toString(),
-      season: episode.season,
+      seasonName: episode.seasonName ?? episode.season ?? '',
       title: episode.title,
       description: episode.description,
-      url: episode.url,
-      posterUrl: episode.posterUrl
+      episodeURL: episode.episodeURL ?? episode.url ?? '',
+      posterURL: episode.posterURL ?? episode.posterUrl ?? episode.poster ?? ''
     });
     setIsEditModalOpen(true);
   };
@@ -134,33 +195,47 @@ export default function Episodes() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
-            {episodes.map((episode) => (
-              <tr key={episode.id} className="hover:bg-gray-50">
-                <td className="px-3 py-4 text-xs">{episode.id}</td>
-                <td className="px-3 py-4 text-xs">{episode.seriesId}</td>
-                <td className="px-3 py-4 text-xs">{episode.season}</td>
-                <td className="px-3 py-4 text-xs">{episode.title}</td>
-                <td className="px-3 py-4 text-xs truncate max-w-xs">{episode.description}</td>
-                <td className="px-3 py-4 text-xs truncate max-w-xs">{episode.url}</td>
-                <td className="px-3 py-4 text-xs truncate max-w-xs">{episode.posterUrl}</td>
-                <td className="px-3 py-4 text-xs">
-                  <div className="flex space-x-2">
-                    <button
-                      onClick={() => openEditModal(episode)}
-                      className="text-gray-600 hover:text-gray-900"
-                    >
-                      <FaPencilAlt />
-                    </button>
-                    <button
-                      onClick={() => openDeleteModal(episode)}
-                      className="text-red-600 hover:text-red-900"
-                    >
-                      <FaTrash />
-                    </button>
-                  </div>
+            {loading ? (
+              <tr>
+                <td colSpan={8} className="py-12 text-center">
+                  <svg className="animate-spin h-6 w-6 mx-auto text-gray-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                  </svg>
+                  <div className="text-sm text-gray-500 mt-2">Loading episodes...</div>
                 </td>
               </tr>
-            ))}
+            ) : (
+              episodes.map((episode) => (
+                <tr key={episode.episodeId} className="hover:bg-gray-50">
+                  <td className="px-3 py-4 text-xs">{episode.episodeId}</td>
+                  <td className="px-3 py-4 text-xs">{episode.seriesId}</td>
+                  <td className="px-3 py-4 text-xs">{episode.seasonName}</td>
+                  <td className="px-3 py-4 text-xs">{episode.title}</td>
+                  <td className="px-3 py-4 text-xs truncate max-w-xs">{episode.description}</td>
+                  <td className="px-3 py-4 text-xs truncate max-w-xs">{episode.episodeURL}</td>
+                  <td className="px-3 py-4 text-xs truncate max-w-xs">{episode.posterURL}</td>
+                  <td className="px-3 py-4 text-xs">
+                    <div className="flex space-x-2">
+                      <button
+                        onClick={() => openEditModal(episode)}
+                        className="text-gray-600 hover:text-gray-900"
+                        disabled={isAdding || isUpdating || isDeleting}
+                      >
+                        <FaPencilAlt />
+                      </button>
+                      <button
+                        onClick={() => openDeleteModal(episode)}
+                        className="text-red-600 hover:text-red-900"
+                        disabled={isAdding || isUpdating || isDeleting}
+                      >
+                        <FaTrash />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
@@ -187,8 +262,8 @@ export default function Episodes() {
               <label className="block text-sm font-medium text-gray-700 mb-1">Season Name</label>
               <input
                 type="text"
-                value={formData.season}
-                onChange={(e) => setFormData({...formData, season: e.target.value})}
+                value={formData.seasonName}
+                onChange={(e) => setFormData({...formData, seasonName: e.target.value})}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="e.g., Season 1"
               />
@@ -218,8 +293,8 @@ export default function Episodes() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Episode URL</label>
             <input
               type="text"
-              value={formData.url}
-              onChange={(e) => setFormData({...formData, url: e.target.value})}
+              value={formData.episodeURL}
+              onChange={(e) => setFormData({...formData, episodeURL: e.target.value})}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="https://example.com/episode.mp4"
             />
@@ -228,8 +303,8 @@ export default function Episodes() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Poster URL</label>
             <input
               type="text"
-              value={formData.posterUrl}
-              onChange={(e) => setFormData({...formData, posterUrl: e.target.value})}
+              value={formData.posterURL}
+              onChange={(e) => setFormData({...formData, posterURL: e.target.value})}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="https://example.com/poster.jpg"
             />
@@ -244,9 +319,20 @@ export default function Episodes() {
           </button>
           <button
             onClick={handleAddEpisode}
-            className="px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800"
+            disabled={isAdding}
+            className={`px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800 ${isAdding ? 'opacity-60 cursor-not-allowed' : ''}`}
           >
-            Create
+            {isAdding ? (
+              <span className="inline-flex items-center">
+                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                </svg>
+                Creating...
+              </span>
+            ) : (
+              'Create'
+            )}
           </button>
         </div>
       </Modal>
@@ -272,8 +358,8 @@ export default function Episodes() {
               <label className="block text-sm font-medium text-gray-700 mb-1">Season Name</label>
               <input
                 type="text"
-                value={formData.season}
-                onChange={(e) => setFormData({...formData, season: e.target.value})}
+                value={formData.seasonName}
+                onChange={(e) => setFormData({...formData, seasonName: e.target.value})}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -300,8 +386,8 @@ export default function Episodes() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Episode URL</label>
             <input
               type="text"
-              value={formData.url}
-              onChange={(e) => setFormData({...formData, url: e.target.value})}
+              value={formData.episodeURL}
+              onChange={(e) => setFormData({...formData, episodeURL: e.target.value})}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -309,8 +395,8 @@ export default function Episodes() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Poster URL</label>
             <input
               type="text"
-              value={formData.posterUrl}
-              onChange={(e) => setFormData({...formData, posterUrl: e.target.value})}
+              value={formData.posterURL}
+              onChange={(e) => setFormData({...formData, posterURL: e.target.value})}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -324,9 +410,20 @@ export default function Episodes() {
           </button>
           <button
             onClick={handleEditEpisode}
-            className="px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800"
+            disabled={isUpdating}
+            className={`px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800 ${isUpdating ? 'opacity-60 cursor-not-allowed' : ''}`}
           >
-            Update
+            {isUpdating ? (
+              <span className="inline-flex items-center">
+                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                </svg>
+                Updating...
+              </span>
+            ) : (
+              'Update'
+            )}
           </button>
         </div>
       </Modal>
@@ -349,9 +446,20 @@ export default function Episodes() {
           </button>
           <button
             onClick={handleDeleteEpisode}
-            className="px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800"
+            disabled={isDeleting}
+            className={`px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800 ${isDeleting ? 'opacity-60 cursor-not-allowed' : ''}`}
           >
-            Delete
+            {isDeleting ? (
+              <span className="inline-flex items-center">
+                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                </svg>
+                Deleting...
+              </span>
+            ) : (
+              'Delete'
+            )}
           </button>
         </div>
       </Modal>
