@@ -1,24 +1,24 @@
 import axiosClient from './axiosClient';
 
 const episodesApi = {
-  getAllEpisodes: () => {
+  getAllEpisodes: (config) => {
     const url = '/Episodes/getAllEpisodes';
-    return axiosClient.get(url);
+    return axiosClient.get(url, config);
   },
 
-  addEpisode: (data) => {
+  addEpisode: (data, config) => {
     const url = '/Episodes/addNewEpisode';
-    return axiosClient.post(url, data);
+    return axiosClient.post(url, data, config);
   },
 
-  updateEpisode: (id, data) => {
+  updateEpisode: (id, data, config) => {
     const url = `/Episodes/updateEpisode/${id}`;
-    return axiosClient.put(url, data);
+    return axiosClient.put(url, data, config);
   },
 
-  deleteEpisode: (id) => {
+  deleteEpisode: (id, config) => {
     const url = `/Episodes/deleteEpisode/${id}`;
-    return axiosClient.delete(url);
+    return axiosClient.delete(url, config);
   },
 };
 

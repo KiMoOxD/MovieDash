@@ -12,7 +12,7 @@ function ToastItem({ toast, onClose }) {
             <p className="text-sm font-medium text-gray-900">{toast.type === 'success' ? 'Success' : 'Error'}</p>
             <p className="mt-1 text-sm text-gray-700">{toast.message}</p>
           </div>
-          <div className="ml-4 flex-shrink-0 flex">
+          <div className="ml-4 shrink-0 flex">
             <button onClick={() => onClose(toast.id)} className="inline-flex text-gray-400 hover:text-gray-600">
               ×
             </button>

@@ -1,39 +1,17 @@
 // Users.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FaPencilAlt, FaTrash, FaUserPlus } from 'react-icons/fa';
 import Modal from '../components/Modal';
+import usersApi from '../api/users';
+import { useToast } from '../contexts/ToastContext';
 
 export default function Users() {
-  // Mock data - replace with API later
-  const [users, setUsers] = useState([
-    {
-      id: 1,
-      name: "John Smith",
-      email: "john@example.com",
-      password: "password123", // In real app, never store plain text!
-      role: "Admin",
-      status: "Active",
-      createdAt: "2024-01-15"
-    },
-    {
-      id: 2,
-      name: "Emma Wilson",
-      email: "emma@example.com",
-      password: "password123",
-      role: "User",
-      status: "Active",
-      createdAt: "2024-02-20"
-    },
-    {
-      id: 3,
-      name: "Michael Brown",
-      email: "michael@example.com",
-      password: "password123",
-      role: "User",
-      status: "Inactive",
-      createdAt: "2024-03-10"
-    }
-  ]);
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(false);
+  // action flags
+  const [isAdding, setIsAdding] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Modal States
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -41,7 +19,7 @@ export default function Users() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
 
-  // Form state for Add/Edit
+  // Form state for Add/Edit (backend fields: userId, name, email, password, role, isActive)
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -50,35 +28,114 @@ export default function Users() {
     isActive: true
   });
 
+  const { addToast } = useToast();
+  const showApiErrors = (err) => {
+    if (err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError' || /cancel/i.test(err?.message || '')) return;
+    const problems = err?.response?.data;
+    if (typeof problems === 'string' && problems.trim()) {
+      addToast(problems, { type: 'error' });
+      return;
+    }
+    if (problems?.errors && typeof problems.errors === 'object') {
+      Object.values(problems.errors).forEach((arr) => {
+        if (Array.isArray(arr)) arr.forEach((m) => addToast(m, { type: 'error' }));
+        else addToast(String(arr), { type: 'error' });
+      });
+      return;
+    }
+    const title = problems?.title || problems?.message || err?.message || 'An error occurred';
+    addToast(title, { type: 'error' });
+  };
+
+  const loadUsers = async (config) => {
+    setLoading(true);
+    try {
+      const res = await usersApi.getAllUsers(config);
+      const data = res.data ?? res;
+      const normalized = (Array.isArray(data) ? data : []).map((u) => ({
+        ...u,
+        userId: u.userId ?? u.id ?? u._id ?? null,
+        name: u.name ?? '',
+        email: u.email ?? '',
+        password: u.password ?? '',
+        role: u.role ?? '',
+        isActive: typeof u.isActive === 'boolean' ? u.isActive : (u.status === 'Active'),
+        createdAt: u.createdAt ?? u.createdAtDate ?? ''
+      }));
+      setUsers(normalized);
+    } catch (err) {
+      console.error('loadUsers error', err.response ?? err);
+      showApiErrors(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const controller = new AbortController();
+    loadUsers({ signal: controller.signal });
+    return () => controller.abort();
+  }, []);
+
   // Handlers
-  const handleAddUser = () => {
-    const newUser = {
-      id: users.length + 1,
-      ...formData,
-      status: formData.isActive ? "Active" : "Inactive",
-      createdAt: new Date().toISOString().split('T')[0]
-    };
-    setUsers([...users, newUser]);
-    setIsAddModalOpen(false);
-    resetForm();
+  const handleAddUser = async () => {
+    setIsAdding(true);
+    try {
+      const payload = {
+        name: formData.name,
+        email: formData.email,
+        password: formData.password,
+        role: formData.role,
+        isActive: Boolean(formData.isActive)
+      };
+      await usersApi.addUser(payload);
+      setIsAddModalOpen(false);
+      resetForm();
+      await loadUsers();
+    } catch (err) {
+      console.error('addUser error', err.response ?? err);
+      showApiErrors(err);
+    } finally {
+      setIsAdding(false);
+    }
   };
 
-  const handleEditUser = () => {
-    setUsers(users.map(u => u.id === currentUser.id ? {
-      ...u,
-      name: formData.name,
-      email: formData.email,
-      password: formData.password,
-      role: formData.role,
-      status: formData.isActive ? "Active" : "Inactive"
-    } : u));
-    setIsEditModalOpen(false);
-    resetForm();
+  const handleEditUser = async () => {
+    if (!currentUser) return;
+    setIsUpdating(true);
+    try {
+      const payload = {
+        name: formData.name,
+        email: formData.email,
+        password: formData.password,
+        role: formData.role,
+        isActive: Boolean(formData.isActive)
+      };
+      await usersApi.updateUser(currentUser.userId, payload);
+      setIsEditModalOpen(false);
+      resetForm();
+      await loadUsers();
+    } catch (err) {
+      console.error('updateUser error', err.response ?? err);
+      showApiErrors(err);
+    } finally {
+      setIsUpdating(false);
+    }
   };
 
-  const handleDeleteUser = () => {
-    setUsers(users.filter(u => u.id !== currentUser.id));
-    setIsDeleteModalOpen(false);
+  const handleDeleteUser = async () => {
+    if (!currentUser) return;
+    setIsDeleting(true);
+    try {
+      await usersApi.deleteUser(currentUser.userId);
+      setIsDeleteModalOpen(false);
+      await loadUsers();
+    } catch (err) {
+      console.error('deleteUser error', err.response ?? err);
+      showApiErrors(err);
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const resetForm = () => {
@@ -94,11 +151,11 @@ export default function Users() {
   const openEditModal = (user) => {
     setCurrentUser(user);
     setFormData({
-      name: user.name,
-      email: user.email,
-      password: user.password, // For demo only — never show real passwords!
-      role: user.role,
-      isActive: user.status === "Active"
+      name: user.name ?? '',
+      email: user.email ?? '',
+      password: '', // don't prefill password
+      role: user.role ?? '',
+      isActive: Boolean(user.isActive)
     });
     setIsEditModalOpen(true);
   };
@@ -140,49 +197,63 @@ export default function Users() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
-            {users.map((user) => (
-              <tr key={user.id} className="hover:bg-gray-50">
-                <td className="px-3 py-4 text-xs">{user.id}</td>
-                <td className="px-3 py-4 text-xs">{user.name}</td>
-                <td className="px-3 py-4 text-xs">{user.email}</td>
-                <td className="px-3 py-4 text-xs">********</td>
-                <td className="px-3 py-4 text-xs">
-                  <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${
-                    user.role === "Admin" 
-                      ? "bg-gray-900 text-white" 
-                      : "bg-gray-200 text-gray-800"
-                  }`}>
-                    {user.role}
-                  </span>
-                </td>
-                <td className="px-6 py-4 text-sm">
-                  <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${
-                    user.status === "Active" 
-                      ? "bg-gray-900 text-white" 
-                      : "bg-gray-200 text-gray-800"
-                  }`}>
-                    {user.status}
-                  </span>
-                </td>
-                <td className="px-6 py-4 text-sm">{user.createdAt}</td>
-                <td className="px-6 py-4 text-sm">
-                  <div className="flex space-x-2">
-                    <button
-                      onClick={() => openEditModal(user)}
-                      className="text-gray-600 hover:text-gray-900"
-                    >
-                      <FaPencilAlt />
-                    </button>
-                    <button
-                      onClick={() => openDeleteModal(user)}
-                      className="text-red-600 hover:text-red-900"
-                    >
-                      <FaTrash />
-                    </button>
-                  </div>
+            {loading ? (
+              <tr>
+                <td colSpan={8} className="py-12 text-center">
+                  <svg className="animate-spin h-6 w-6 mx-auto text-gray-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                  </svg>
+                  <div className="text-sm text-gray-500 mt-2">Loading users...</div>
                 </td>
               </tr>
-            ))}
+            ) : (
+              users.map((user) => (
+                <tr key={user.userId ?? user.email ?? Math.random()} className="hover:bg-gray-50">
+                  <td className="px-3 py-4 text-xs">{user.userId ?? '-'}</td>
+                  <td className="px-3 py-4 text-xs">{user.name}</td>
+                  <td className="px-3 py-4 text-xs">{user.email}</td>
+                  <td className="px-3 py-4 text-xs">********</td>
+                  <td className="px-3 py-4 text-xs">
+                    <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${
+                      user.role === "Admin" 
+                        ? "bg-gray-900 text-white" 
+                        : "bg-gray-200 text-gray-800"
+                    }`}>
+                      {user.role}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 text-sm">
+                    <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${
+                      user.isActive 
+                        ? "bg-gray-900 text-white" 
+                        : "bg-gray-200 text-gray-800"
+                    }`}>
+                      {user.isActive ? 'Active' : 'Inactive'}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 text-sm">{user.createdAt}</td>
+                  <td className="px-6 py-4 text-sm">
+                    <div className="flex space-x-2">
+                      <button
+                        onClick={() => openEditModal(user)}
+                        className="text-gray-600 hover:text-gray-900"
+                        disabled={isAdding || isUpdating || isDeleting}
+                      >
+                        <FaPencilAlt />
+                      </button>
+                      <button
+                        onClick={() => openDeleteModal(user)}
+                        className="text-red-600 hover:text-red-900"
+                        disabled={isAdding || isUpdating || isDeleting}
+                      >
+                        <FaTrash />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
@@ -261,9 +332,20 @@ export default function Users() {
           </button>
           <button
             onClick={handleAddUser}
-            className="px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800"
+            disabled={isAdding}
+            className={`px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800 ${isAdding ? 'opacity-60 cursor-not-allowed' : ''}`}
           >
-            Create
+            {isAdding ? (
+              <span className="inline-flex items-center">
+                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                </svg>
+                Creating...
+              </span>
+            ) : (
+              'Create'
+            )}
           </button>
         </div>
       </Modal>
@@ -339,9 +421,20 @@ export default function Users() {
           </button>
           <button
             onClick={handleEditUser}
-            className="px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800"
+            disabled={isUpdating}
+            className={`px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800 ${isUpdating ? 'opacity-60 cursor-not-allowed' : ''}`}
           >
-            Update
+            {isUpdating ? (
+              <span className="inline-flex items-center">
+                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                </svg>
+                Updating...
+              </span>
+            ) : (
+              'Update'
+            )}
           </button>
         </div>
       </Modal>
@@ -364,9 +457,20 @@ export default function Users() {
           </button>
           <button
             onClick={handleDeleteUser}
-            className="px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800"
+            disabled={isDeleting}
+            className={`px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800 ${isDeleting ? 'opacity-60 cursor-not-allowed' : ''}`}
           >
-            Delete
+            {isDeleting ? (
+              <span className="inline-flex items-center">
+                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                </svg>
+                Deleting...
+              </span>
+            ) : (
+              'Delete'
+            )}
           </button>
         </div>
       </Modal>

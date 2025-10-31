@@ -1,36 +1,16 @@
 // UserSubscriptions.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FaPencilAlt, FaTrash } from 'react-icons/fa';
 import Modal from '../components/Modal'; // Reusing your existing modal component
+import userSubscriptionsApi from '../api/userSubscriptions';
+import { useToast } from '../contexts/ToastContext';
 
 export default function UserSubscriptions() {
-  // Mock data - replace with API later
-  const [assignments, setAssignments] = useState([
-    {
-      id: 1,
-      userId: 1,
-      subscriptionId: 3,
-      startDate: "2024-01-15",
-      endDate: "2024-02-15",
-      status: "Active"
-    },
-    {
-      id: 2,
-      userId: 2,
-      subscriptionId: 1,
-      startDate: "2024-02-20",
-      endDate: "2024-03-20",
-      status: "Active"
-    },
-    {
-      id: 3,
-      userId: 3,
-      subscriptionId: 2,
-      startDate: "2023-12-10",
-      endDate: "2024-01-10",
-      status: "Inactive"
-    }
-  ]);
+  const [assignments, setAssignments] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [isAdding, setIsAdding] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Modal States
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -41,49 +21,146 @@ export default function UserSubscriptions() {
   // Form state for Add/Edit
   const [formData, setFormData] = useState({
     userId: '',
-    subscriptionId: '',
+    subId: '',
     startDate: '',
     endDate: '',
     isActive: true
   });
 
+  const { addToast } = useToast();
+  const showApiErrors = (err) => {
+    if (err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError' || /cancel/i.test(err?.message || '')) return;
+    const problems = err?.response?.data;
+    if (typeof problems === 'string' && problems.trim()) {
+      addToast(problems, { type: 'error' });
+      return;
+    }
+    if (problems?.errors && typeof problems.errors === 'object') {
+      Object.values(problems.errors).forEach((arr) => {
+        if (Array.isArray(arr)) arr.forEach((m) => addToast(m, { type: 'error' }));
+        else addToast(String(arr), { type: 'error' });
+      });
+      return;
+    }
+    const title = problems?.title || problems?.message || err?.message || 'An error occurred';
+    addToast(title, { type: 'error' });
+  };
+
+  const loadAssignments = async (config) => {
+    setLoading(true);
+    try {
+      const res = await userSubscriptionsApi.getAllUserSubs(config);
+      const data = res.data ?? res;
+      const normalized = (Array.isArray(data) ? data : []).map((s) => ({
+        ...s,
+        // prefer backend record id if present
+        userSubId: s.userSubId ?? s.id ?? s._id ?? null,
+        userId: s.userId ?? s.user ?? null,
+        subId: s.subId ?? s.subscriptionId ?? s.subscription ?? null,
+        startDate: s.startDate ? new Date(s.startDate).toISOString().split('T')[0] : '',
+        endDate: s.endDate ? new Date(s.endDate).toISOString().split('T')[0] : '',
+        isActive: typeof s.isActive === 'boolean' ? s.isActive : (s.status === 'Active')
+      }));
+      setAssignments(normalized);
+    } catch (err) {
+      console.error('loadAssignments error', err.response ?? err);
+      // If backend returns 404 with a plain-text "no records" message,
+      // treat it as an empty list instead of leaving stale data in the UI.
+      const resp = err?.response;
+      if (resp && (resp.status === 404 || resp.status === 204)) {
+        const body = resp.data;
+        if (typeof body === 'string' && body.trim()) {
+          // clear assignments and show a neutral/info toast instead of an error
+          setAssignments([]);
+          addToast(body, { type: 'info' });
+          return;
+        }
+        // no body -> just clear
+        setAssignments([]);
+        return;
+      }
+      showApiErrors(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const controller = new AbortController();
+    loadAssignments({ signal: controller.signal });
+    return () => controller.abort();
+  }, []);
+
   // Handlers
-  const handleAddAssignment = () => {
-    const newAssignment = {
-      id: assignments.length + 1,
-      userId: parseInt(formData.userId),
-      subscriptionId: parseInt(formData.subscriptionId),
-      startDate: formData.startDate,
-      endDate: formData.endDate,
-      status: formData.isActive ? "Active" : "Inactive"
-    };
-    setAssignments([...assignments, newAssignment]);
-    setIsAddModalOpen(false);
-    resetForm();
+  const handleAddAssignment = async () => {
+    setIsAdding(true);
+    try {
+      // backend expects top-level fields (id is assigned server-side)
+      const payload = {
+        userId: Number(formData.userId),
+        subId: Number(formData.subId),
+        startDate: formData.startDate || null,
+        endDate: formData.endDate || null,
+        isActive: Boolean(formData.isActive)
+      };
+      await userSubscriptionsApi.addUserSub(payload);
+      setIsAddModalOpen(false);
+      resetForm();
+      await loadAssignments();
+    } catch (err) {
+      console.error('addUserSub error', err.response ?? err);
+      showApiErrors(err);
+    } finally {
+      setIsAdding(false);
+    }
   };
 
-  const handleEditAssignment = () => {
-    setAssignments(assignments.map(a => a.id === currentAssignment.id ? {
-      ...a,
-      userId: parseInt(formData.userId),
-      subscriptionId: parseInt(formData.subscriptionId),
-      startDate: formData.startDate,
-      endDate: formData.endDate,
-      status: formData.isActive ? "Active" : "Inactive"
-    } : a));
-    setIsEditModalOpen(false);
-    resetForm();
+  const handleEditAssignment = async () => {
+    if (!currentAssignment) return;
+    setIsUpdating(true);
+    try {
+      const payload = {
+        userId: Number(formData.userId),
+        subId: Number(formData.subId),
+        startDate: formData.startDate || null,
+        endDate: formData.endDate || null,
+        isActive: Boolean(formData.isActive)
+      };
+      // prefer normalized userSubId, fall back to raw id
+      const recordId = currentAssignment.userSubId ?? currentAssignment.id ?? currentAssignment._id;
+      await userSubscriptionsApi.updateUserSub(recordId, payload);
+      setIsEditModalOpen(false);
+      resetForm();
+      await loadAssignments();
+    } catch (err) {
+      console.error('updateUserSub error', err.response ?? err);
+      showApiErrors(err);
+    } finally {
+      setIsUpdating(false);
+    }
   };
 
-  const handleDeleteAssignment = () => {
-    setAssignments(assignments.filter(a => a.id !== currentAssignment.id));
-    setIsDeleteModalOpen(false);
+  const handleDeleteAssignment = async () => {
+    if (!currentAssignment) return;
+    setIsDeleting(true);
+    try {
+      // prefer normalized userSubId, fall back to raw id
+      const recordId = currentAssignment.userSubId ?? currentAssignment.id ?? currentAssignment._id;
+      await userSubscriptionsApi.deleteUserSub(recordId);
+      setIsDeleteModalOpen(false);
+      await loadAssignments();
+    } catch (err) {
+      console.error('deleteUserSub error', err.response ?? err);
+      showApiErrors(err);
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const resetForm = () => {
     setFormData({
       userId: '',
-      subscriptionId: '',
+      subId: '',
       startDate: '',
       endDate: '',
       isActive: true
@@ -93,11 +170,11 @@ export default function UserSubscriptions() {
   const openEditModal = (assignment) => {
     setCurrentAssignment(assignment);
     setFormData({
-      userId: assignment.userId.toString(),
-      subscriptionId: assignment.subscriptionId.toString(),
+      userId: (assignment.userId ?? assignment.user)?.toString() ?? '',
+      subId: (assignment.subId ?? assignment.subscriptionId ?? assignment.subscription)?.toString() ?? '',
       startDate: assignment.startDate,
       endDate: assignment.endDate,
-      isActive: assignment.status === "Active"
+      isActive: Boolean(assignment.isActive)
     });
     setIsEditModalOpen(true);
   };
@@ -138,40 +215,54 @@ export default function UserSubscriptions() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
-            {assignments.map((assignment) => (
-              <tr key={assignment.id} className="hover:bg-gray-50">
-                <td className="px-3 py-4 text-xs">{assignment.id}</td>
-                <td className="px-3 py-4 text-xs">{assignment.userId}</td>
-                <td className="px-3 py-4 text-xs">{assignment.subscriptionId}</td>
-                <td className="px-3 py-4 text-xs">{assignment.startDate}</td>
-                <td className="px-3 py-4 text-xs">{assignment.endDate}</td>
-                <td className="px-3 py-4 text-xs">
-                  <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${
-                    assignment.status === "Active" 
-                      ? "bg-gray-900 text-white" 
-                      : "bg-gray-200 text-gray-800"
-                  }`}>
-                    {assignment.status}
-                  </span>
-                </td>
-                <td className="px-6 py-4 text-sm">
-                  <div className="flex space-x-2">
-                    <button
-                      onClick={() => openEditModal(assignment)}
-                      className="text-gray-600 hover:text-gray-900"
-                    >
-                      <FaPencilAlt />
-                    </button>
-                    <button
-                      onClick={() => openDeleteModal(assignment)}
-                      className="text-red-600 hover:text-red-900"
-                    >
-                      <FaTrash />
-                    </button>
-                  </div>
+            {loading ? (
+              <tr>
+                <td colSpan={7} className="py-12 text-center">
+                  <svg className="animate-spin h-6 w-6 mx-auto text-gray-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                  </svg>
+                  <div className="text-sm text-gray-500 mt-2">Loading user subscriptions...</div>
                 </td>
               </tr>
-            ))}
+            ) : (
+              assignments.map((assignment) => (
+                <tr key={assignment.userSubId ?? `${assignment.userId}-${assignment.subId}` ?? Math.random()} className="hover:bg-gray-50">
+                  <td className="px-3 py-4 text-xs">{assignment.userSubId ?? '-'}</td>
+                  <td className="px-3 py-4 text-xs">{assignment.userId}</td>
+                  <td className="px-3 py-4 text-xs">{assignment.subId}</td>
+                  <td className="px-3 py-4 text-xs">{assignment.startDate}</td>
+                  <td className="px-3 py-4 text-xs">{assignment.endDate}</td>
+                  <td className="px-3 py-4 text-xs">
+                    <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${
+                      assignment.isActive 
+                        ? "bg-gray-900 text-white" 
+                        : "bg-gray-200 text-gray-800"
+                    }`}>
+                      {assignment.isActive ? 'Active' : 'Inactive'}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 text-sm">
+                    <div className="flex space-x-2">
+                      <button
+                        onClick={() => openEditModal(assignment)}
+                        className="text-gray-600 hover:text-gray-900"
+                        disabled={isAdding || isUpdating || isDeleting}
+                      >
+                        <FaPencilAlt />
+                      </button>
+                      <button
+                        onClick={() => openDeleteModal(assignment)}
+                        className="text-red-600 hover:text-red-900"
+                        disabled={isAdding || isUpdating || isDeleting}
+                      >
+                        <FaTrash />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
@@ -198,8 +289,8 @@ export default function UserSubscriptions() {
               <label className="block text-sm font-medium text-gray-700 mb-1">Subscription ID</label>
               <input
                 type="number"
-                value={formData.subscriptionId}
-                onChange={(e) => setFormData({...formData, subscriptionId: e.target.value})}
+                value={formData.subId}
+                onChange={(e) => setFormData({...formData, subId: e.target.value})}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="0"
               />
@@ -209,21 +300,19 @@ export default function UserSubscriptions() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
               <input
-                type="text"
+                type="date"
                 value={formData.startDate}
                 onChange={(e) => setFormData({...formData, startDate: e.target.value})}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="mm/dd/yyyy"
               />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
               <input
-                type="text"
+                type="date"
                 value={formData.endDate}
                 onChange={(e) => setFormData({...formData, endDate: e.target.value})}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="mm/dd/yyyy"
               />
             </div>
           </div>
@@ -231,6 +320,7 @@ export default function UserSubscriptions() {
             <label className="block text-sm font-medium text-gray-700">Active Status</label>
             <div className="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
               <input
+                id="toggle"
                 type="checkbox"
                 checked={formData.isActive}
                 onChange={(e) => setFormData({...formData, isActive: e.target.checked})}
@@ -254,9 +344,20 @@ export default function UserSubscriptions() {
           </button>
           <button
             onClick={handleAddAssignment}
-            className="px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800"
+            disabled={isAdding}
+            className={`px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800 ${isAdding ? 'opacity-60 cursor-not-allowed' : ''}`}
           >
-            Create
+            {isAdding ? (
+              <span className="inline-flex items-center">
+                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                </svg>
+                Creating...
+              </span>
+            ) : (
+              'Create'
+            )}
           </button>
         </div>
       </Modal>
@@ -282,8 +383,8 @@ export default function UserSubscriptions() {
               <label className="block text-sm font-medium text-gray-700 mb-1">Subscription ID</label>
               <input
                 type="number"
-                value={formData.subscriptionId}
-                onChange={(e) => setFormData({...formData, subscriptionId: e.target.value})}
+                value={formData.subId}
+                onChange={(e) => setFormData({...formData, subId: e.target.value})}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -292,7 +393,7 @@ export default function UserSubscriptions() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
               <input
-                type="text"
+                type="date"
                 value={formData.startDate}
                 onChange={(e) => setFormData({...formData, startDate: e.target.value})}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -301,7 +402,7 @@ export default function UserSubscriptions() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
               <input
-                type="text"
+                type="date"
                 value={formData.endDate}
                 onChange={(e) => setFormData({...formData, endDate: e.target.value})}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -312,6 +413,7 @@ export default function UserSubscriptions() {
             <label className="block text-sm font-medium text-gray-700">Active Status</label>
             <div className="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
               <input
+                id="toggle"
                 type="checkbox"
                 checked={formData.isActive}
                 onChange={(e) => setFormData({...formData, isActive: e.target.checked})}
@@ -335,9 +437,20 @@ export default function UserSubscriptions() {
           </button>
           <button
             onClick={handleEditAssignment}
-            className="px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800"
+            disabled={isUpdating}
+            className={`px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800 ${isUpdating ? 'opacity-60 cursor-not-allowed' : ''}`}
           >
-            Update
+            {isUpdating ? (
+              <span className="inline-flex items-center">
+                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                </svg>
+                Updating...
+              </span>
+            ) : (
+              'Update'
+            )}
           </button>
         </div>
       </Modal>
@@ -360,9 +473,20 @@ export default function UserSubscriptions() {
           </button>
           <button
             onClick={handleDeleteAssignment}
-            className="px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800"
+            disabled={isDeleting}
+            className={`px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800 ${isDeleting ? 'opacity-60 cursor-not-allowed' : ''}`}
           >
-            Delete
+            {isDeleting ? (
+              <span className="inline-flex items-center">
+                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                </svg>
+                Deleting...
+              </span>
+            ) : (
+              'Delete'
+            )}
           </button>
         </div>
       </Modal>

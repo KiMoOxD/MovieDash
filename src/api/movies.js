@@ -1,24 +1,24 @@
 import axiosClient from './axiosClient';
 
 const moviesApi = {
-  getAllMovies: () => {
+  getAllMovies: (config) => {
     const url = '/Movies/getAllMovies';
-    return axiosClient.get(url);
+    return axiosClient.get(url, config);
   },
 
-  addMovie: (data) => {
+  addMovie: (data, config) => {
     const url = '/Movies/addNewMovie';
-    return axiosClient.post(url, data);
+    return axiosClient.post(url, data, config);
   },
 
-  updateMovie: (id, data) => {
+  updateMovie: (id, data, config) => {
     const url = `/Movies/updateMovie/${id}`;
-    return axiosClient.put(url, data);
+    return axiosClient.put(url, data, config);
   },
 
-  deleteMovie: (id) => {
+  deleteMovie: (id, config) => {
     const url = `/Movies/deleteMovie/${id}`;
-    return axiosClient.delete(url);
+    return axiosClient.delete(url, config);
   },
 };
 

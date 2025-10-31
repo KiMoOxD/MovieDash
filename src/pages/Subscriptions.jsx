@@ -1,40 +1,17 @@
 // Subscriptions.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FaPencilAlt, FaTrash } from 'react-icons/fa';
 import Modal from '../components/Modal';
+import subscriptionsApi from '../api/subscriptions';
+import { useToast } from '../contexts/ToastContext';
 
 export default function Subscriptions() {
-  // Mock data - replace with API later
-  const [plans, setPlans] = useState([
-    {
-      id: 1,
-      name: "Basic",
-      price: 9.99,
-      duration: 30,
-      description: "Access to basic content library"
-    },
-    {
-      id: 2,
-      name: "Standard",
-      price: 14.99,
-      duration: 30,
-      description: "Access to full content library with HD streaming"
-    },
-    {
-      id: 3,
-      name: "Premium",
-      price: 19.99,
-      duration: 30,
-      description: "Full access with 4K streaming and multiple devices"
-    },
-    {
-      id: 4,
-      name: "Basic Annual",
-      price: 99.99,
-      duration: 365,
-      description: "Basic plan for one year with discount"
-    }
-  ]);
+  const [plans, setPlans] = useState([]);
+  const [loading, setLoading] = useState(false);
+  // action flags
+  const [isAdding, setIsAdding] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Modal States
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -42,49 +19,126 @@ export default function Subscriptions() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [currentPlan, setCurrentPlan] = useState(null);
 
-  // Form state for Add/Edit
+  // Form state for Add/Edit - backend fields: planName, price, durationDays, description
   const [formData, setFormData] = useState({
-    name: '',
+    planName: '',
     price: 0,
-    duration: 30,
+    durationDays: 30,
     description: ''
   });
 
+  const { addToast } = useToast();
+  const showApiErrors = (err) => {
+    if (err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError' || /cancel/i.test(err?.message || '')) return;
+    const problems = err?.response?.data;
+    if (typeof problems === 'string' && problems.trim()) {
+      addToast(problems, { type: 'error' });
+      return;
+    }
+    if (problems?.errors && typeof problems.errors === 'object') {
+      Object.values(problems.errors).forEach((arr) => {
+        if (Array.isArray(arr)) arr.forEach((m) => addToast(m, { type: 'error' }));
+        else addToast(String(arr), { type: 'error' });
+      });
+      return;
+    }
+    const title = problems?.title || problems?.message || err?.message || 'An error occurred';
+    addToast(title, { type: 'error' });
+  };
+
+  const loadSubscriptions = async (config) => {
+    setLoading(true);
+    try {
+      const res = await subscriptionsApi.getAllSubscriptions(config);
+      const data = res.data ?? res;
+      const normalized = (Array.isArray(data) ? data : []).map((s) => ({
+        ...s,
+        // backend uses subId as the subscription identifier
+        subId: s.subId ?? s.subscriptionId ?? s.id ?? s._id ?? null,
+        planName: s.planName ?? s.name ?? '',
+        price: typeof s.price === 'number' ? s.price : Number(s.price) || 0,
+        durationDays: s.durationDays ?? s.duration ?? s.days ?? 0,
+        description: s.description ?? ''
+      }));
+      setPlans(normalized);
+    } catch (err) {
+      console.error('loadSubscriptions error', err.response ?? err);
+      showApiErrors(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const controller = new AbortController();
+    loadSubscriptions({ signal: controller.signal });
+    return () => controller.abort();
+  }, []);
+
   // Handlers
-  const handleAddPlan = () => {
-    const newPlan = {
-      id: plans.length + 1,
-      ...formData,
-      price: parseFloat(formData.price),
-      duration: parseInt(formData.duration)
-    };
-    setPlans([...plans, newPlan]);
-    setIsAddModalOpen(false);
-    resetForm();
+  const handleAddPlan = async () => {
+    setIsAdding(true);
+    try {
+      const payload = {
+        planName: formData.planName,
+        price: Number(formData.price),
+        durationDays: Number(formData.durationDays),
+        description: formData.description
+      };
+      await subscriptionsApi.addSubscription(payload);
+      setIsAddModalOpen(false);
+      resetForm();
+      await loadSubscriptions();
+    } catch (err) {
+      console.error('addSubscription error', err.response ?? err);
+      showApiErrors(err);
+    } finally {
+      setIsAdding(false);
+    }
   };
 
-  const handleEditPlan = () => {
-    setPlans(plans.map(p => p.id === currentPlan.id ? {
-      ...p,
-      name: formData.name,
-      price: parseFloat(formData.price),
-      duration: parseInt(formData.duration),
-      description: formData.description
-    } : p));
-    setIsEditModalOpen(false);
-    resetForm();
+  const handleEditPlan = async () => {
+    if (!currentPlan) return;
+    setIsUpdating(true);
+    try {
+      const payload = {
+        planName: formData.planName,
+        price: Number(formData.price),
+        durationDays: Number(formData.durationDays),
+        description: formData.description
+      };
+  await subscriptionsApi.updateSubscription(currentPlan.subId, payload);
+      setIsEditModalOpen(false);
+      resetForm();
+      await loadSubscriptions();
+    } catch (err) {
+      console.error('updateSubscription error', err.response ?? err);
+      showApiErrors(err);
+    } finally {
+      setIsUpdating(false);
+    }
   };
 
-  const handleDeletePlan = () => {
-    setPlans(plans.filter(p => p.id !== currentPlan.id));
-    setIsDeleteModalOpen(false);
+  const handleDeletePlan = async () => {
+    if (!currentPlan) return;
+    setIsDeleting(true);
+    try {
+  await subscriptionsApi.deleteSubscription(currentPlan.subId);
+      setIsDeleteModalOpen(false);
+      await loadSubscriptions();
+    } catch (err) {
+      console.error('deleteSubscription error', err.response ?? err);
+      showApiErrors(err);
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const resetForm = () => {
     setFormData({
-      name: '',
+      planName: '',
       price: 0,
-      duration: 30,
+      durationDays: 30,
       description: ''
     });
   };
@@ -92,10 +146,10 @@ export default function Subscriptions() {
   const openEditModal = (plan) => {
     setCurrentPlan(plan);
     setFormData({
-      name: plan.name,
-      price: plan.price,
-      duration: plan.duration,
-      description: plan.description
+      planName: plan.planName ?? plan.name ?? '',
+      price: plan.price ?? 0,
+      durationDays: plan.durationDays ?? plan.duration ?? 0,
+      description: plan.description ?? ''
     });
     setIsEditModalOpen(true);
   };
@@ -135,31 +189,45 @@ export default function Subscriptions() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
-            {plans.map((plan) => (
-              <tr key={plan.id} className="hover:bg-gray-50">
-                <td className="px-3 py-4 text-xs">{plan.id}</td>
-                <td className="px-3 py-4 text-xs">{plan.name}</td>
-                <td className="px-3 py-4 text-xs">${plan.price.toFixed(2)}</td>
-                <td className="px-3 py-4 text-xs">{plan.duration}</td>
-                <td className="px-3 py-4 text-xs truncate max-w-xs">{plan.description}</td>
-                <td className="px-3 py-4 text-xs">
-                  <div className="flex space-x-2">
-                    <button
-                      onClick={() => openEditModal(plan)}
-                      className="text-gray-600 hover:text-gray-900"
-                    >
-                      <FaPencilAlt />
-                    </button>
-                    <button
-                      onClick={() => openDeleteModal(plan)}
-                      className="text-red-600 hover:text-red-900"
-                    >
-                      <FaTrash />
-                    </button>
-                  </div>
+            {loading ? (
+              <tr>
+                <td colSpan={6} className="py-12 text-center">
+                  <svg className="animate-spin h-6 w-6 mx-auto text-gray-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                  </svg>
+                  <div className="text-sm text-gray-500 mt-2">Loading subscription plans...</div>
                 </td>
               </tr>
-            ))}
+            ) : (
+              plans.map((plan) => (
+                <tr key={plan.subId ?? plan.planName ?? Math.random()} className="hover:bg-gray-50">
+                  <td className="px-3 py-4 text-xs">{plan.subId ?? '-'}</td>
+                  <td className="px-3 py-4 text-xs">{plan.planName}</td>
+                  <td className="px-3 py-4 text-xs">${(Number(plan.price) || 0).toFixed(2)}</td>
+                  <td className="px-3 py-4 text-xs">{plan.durationDays}</td>
+                  <td className="px-3 py-4 text-xs truncate max-w-xs">{plan.description}</td>
+                  <td className="px-3 py-4 text-xs">
+                    <div className="flex space-x-2">
+                      <button
+                        onClick={() => openEditModal(plan)}
+                        className="text-gray-600 hover:text-gray-900"
+                        disabled={isAdding || isUpdating || isDeleting}
+                      >
+                        <FaPencilAlt />
+                      </button>
+                      <button
+                        onClick={() => openDeleteModal(plan)}
+                        className="text-red-600 hover:text-red-900"
+                        disabled={isAdding || isUpdating || isDeleting}
+                      >
+                        <FaTrash />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
@@ -170,13 +238,13 @@ export default function Subscriptions() {
         onClose={() => setIsAddModalOpen(false)}
         title="Add New Plan"
       >
-        <div className="space-y-4">
+          <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Plan Name</label>
             <input
               type="text"
-              value={formData.name}
-              onChange={(e) => setFormData({...formData, name: e.target.value})}
+              value={formData.planName}
+              onChange={(e) => setFormData({...formData, planName: e.target.value})}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="Enter plan name"
             />
@@ -199,8 +267,8 @@ export default function Subscriptions() {
               <input
                 type="number"
                 min="1"
-                value={formData.duration}
-                onChange={(e) => setFormData({...formData, duration: e.target.value})}
+                value={formData.durationDays}
+                onChange={(e) => setFormData({...formData, durationDays: e.target.value})}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="30"
               />
@@ -226,9 +294,20 @@ export default function Subscriptions() {
           </button>
           <button
             onClick={handleAddPlan}
-            className="px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800"
+            disabled={isAdding}
+            className={`px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800 ${isAdding ? 'opacity-60 cursor-not-allowed' : ''}`}
           >
-            Create
+            {isAdding ? (
+              <span className="inline-flex items-center">
+                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                </svg>
+                Creating...
+              </span>
+            ) : (
+              'Create'
+            )}
           </button>
         </div>
       </Modal>
@@ -244,8 +323,8 @@ export default function Subscriptions() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Plan Name</label>
             <input
               type="text"
-              value={formData.name}
-              onChange={(e) => setFormData({...formData, name: e.target.value})}
+              value={formData.planName}
+              onChange={(e) => setFormData({...formData, planName: e.target.value})}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -266,8 +345,8 @@ export default function Subscriptions() {
               <input
                 type="number"
                 min="1"
-                value={formData.duration}
-                onChange={(e) => setFormData({...formData, duration: e.target.value})}
+                value={formData.durationDays}
+                onChange={(e) => setFormData({...formData, durationDays: e.target.value})}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -291,9 +370,20 @@ export default function Subscriptions() {
           </button>
           <button
             onClick={handleEditPlan}
-            className="px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800"
+            disabled={isUpdating}
+            className={`px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800 ${isUpdating ? 'opacity-60 cursor-not-allowed' : ''}`}
           >
-            Update
+            {isUpdating ? (
+              <span className="inline-flex items-center">
+                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                </svg>
+                Updating...
+              </span>
+            ) : (
+              'Update'
+            )}
           </button>
         </div>
       </Modal>
@@ -316,9 +406,20 @@ export default function Subscriptions() {
           </button>
           <button
             onClick={handleDeletePlan}
-            className="px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800"
+            disabled={isDeleting}
+            className={`px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800 ${isDeleting ? 'opacity-60 cursor-not-allowed' : ''}`}
           >
-            Delete
+            {isDeleting ? (
+              <span className="inline-flex items-center">
+                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                </svg>
+                Deleting...
+              </span>
+            ) : (
+              'Delete'
+            )}
           </button>
         </div>
       </Modal>

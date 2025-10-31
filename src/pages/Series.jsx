@@ -29,7 +29,14 @@ export default function Series() {
   const { addToast } = useToast();
 
   const showApiErrors = (err) => {
+    if (err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError' || /cancel/i.test(err?.message || '')) {
+      return;
+    }
     const problems = err?.response?.data;
+    if (typeof problems === 'string' && problems.trim()) {
+      addToast(problems, { type: 'error' });
+      return;
+    }
     if (problems?.errors && typeof problems.errors === 'object') {
       Object.values(problems.errors).forEach((arr) => {
         if (Array.isArray(arr)) arr.forEach((m) => addToast(m, { type: 'error' }));
@@ -37,14 +44,14 @@ export default function Series() {
       });
       return;
     }
-    const title = problems?.title || err?.message || 'An error occurred';
+    const title = problems?.title || problems?.message || err?.message || 'An error occurred';
     addToast(title, { type: 'error' });
   };
 
-  const loadSeries = async () => {
+  const loadSeries = async (config) => {
     setLoading(true);
     try {
-      const res = await seriesApi.getAllSeries();
+      const res = await seriesApi.getAllSeries(config);
       const data = res.data ?? res;
       const normalized = (Array.isArray(data) ? data : []).map((s) => ({
         ...s,
@@ -61,7 +68,9 @@ export default function Series() {
   };
 
   useEffect(() => {
-    loadSeries();
+    const controller = new AbortController();
+    loadSeries({ signal: controller.signal });
+    return () => controller.abort();
   }, []);
 
   // Handlers -> call backend

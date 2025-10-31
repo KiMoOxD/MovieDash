@@ -30,10 +30,10 @@ export default function Movies() {
   });
 
   // Helpers
-  const loadMovies = async () => {
+  const loadMovies = async (config) => {
     setLoading(true);
     try {
-      const res = await moviesApi.getAllMovies();
+      const res = await moviesApi.getAllMovies(config);
       // Normalize backend keys to the front-end shape we use in the UI.
       const data = res.data ?? res;
       const normalized = (Array.isArray(data) ? data : []).map((m) => ({
@@ -52,13 +52,25 @@ export default function Movies() {
   };
 
   useEffect(() => {
-    loadMovies();
+    const controller = new AbortController();
+    loadMovies({ signal: controller.signal });
+    return () => controller.abort();
   }, []);
 
   const { addToast } = useToast();
 
   const showApiErrors = (err) => {
+    // ignore cancellation
+    if (err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError' || /cancel/i.test(err?.message || '')) {
+      // request was aborted, nothing to show
+      return;
+    }
     const problems = err?.response?.data;
+    // if backend returned plain text message, show it directly
+    if (typeof problems === 'string' && problems.trim()) {
+      addToast(problems, { type: 'error' });
+      return;
+    }
     if (problems?.errors && typeof problems.errors === 'object') {
       Object.values(problems.errors).forEach((arr) => {
         if (Array.isArray(arr)) arr.forEach((m) => addToast(m, { type: 'error' }));
@@ -66,7 +78,7 @@ export default function Movies() {
       });
       return;
     }
-    const title = problems?.title || err?.message || 'An error occurred';
+    const title = problems?.title || problems?.message || err?.message || 'An error occurred';
     addToast(title, { type: 'error' });
   };
 

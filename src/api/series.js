@@ -10,24 +10,24 @@ import axiosClient from './axiosClient';
  */
 
 const seriesApi = {
-  getAllSeries: () => {
+  getAllSeries: (config) => {
     const url = '/Series/getAllSeries';
-    return axiosClient.get(url);
+    return axiosClient.get(url, config);
   },
 
-  addSeries: (data) => {
+  addSeries: (data, config) => {
     const url = '/Series/addNewSeries';
-    return axiosClient.post(url, data);
+    return axiosClient.post(url, data, config);
   },
 
-  updateSeries: (id, data) => {
+  updateSeries: (id, data, config) => {
     const url = `/Series/updateSeries/${id}`;
-    return axiosClient.put(url, data);
+    return axiosClient.put(url, data, config);
   },
 
-  deleteSeries: (id) => {
+  deleteSeries: (id, config) => {
     const url = `/Series/deleteSeries/${id}`;
-    return axiosClient.delete(url);
+    return axiosClient.delete(url, config);
   },
 };
 
