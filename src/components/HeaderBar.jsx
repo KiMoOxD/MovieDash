@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { FaSearch } from 'react-icons/fa';
 import { useAuth } from '../contexts/AuthContext';
+import usersApi from '../api/users'
+import settingsApi from '../api/settings'
 import { useToast } from '../contexts/ToastContext';
 import { useNavigate } from 'react-router-dom';
 
@@ -31,6 +33,7 @@ const UserProfile = () => {
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
+  const [freshUser, setFreshUser] = useState(null)
 
   useEffect(() => {
     const onDoc = (e) => {
@@ -41,10 +44,62 @@ const UserProfile = () => {
     return () => document.removeEventListener('click', onDoc)
   }, [])
 
+  useEffect(() => {
+    if (!user) return
+    const ac = new AbortController()
+    let mounted = true
+    // try several ways to get a user id: auth user object, decoded token from localStorage,
+    // or an accessToken returned in the auth response.
+    const idFromAuthObj = user?.id ?? user?.userId ?? null
+    const idFromTokenStore = settingsApi.getUserIdFromToken()
+    const decodeJwt = (token) => {
+      try {
+        if (!token) return null
+        const parts = token.split('.')
+        if (parts.length < 2) return null
+        const base64Url = parts[1]
+        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/')
+        const padded = base64.padEnd(base64.length + (4 - (base64.length % 4)) % 4, '=')
+        const json = decodeURIComponent(
+          atob(padded)
+            .split('')
+            .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+            .join('')
+        )
+        const payload = JSON.parse(json)
+        return payload.userId ?? payload.user_id ?? payload.sub ?? payload.id ?? payload.nameid ?? null
+      } catch (e) {
+        return null
+      }
+    }
+
+    const idFromAccessToken = decodeJwt(user?.accessToken || user?.token || null)
+    const id = idFromAuthObj ?? idFromTokenStore ?? idFromAccessToken
+    if (!id) return
+    usersApi.getUserById(id, { signal: ac.signal })
+      .then((res) => {
+        // console.log(res)
+        if (!mounted) return
+        const data = res?.data ?? res
+        const u = data?.email ?? data?.user ?? data
+        setFreshUser(u)
+      })
+      .catch((err) => {
+        // ignore cancel
+        if (err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError') return
+        // otherwise ignore silently
+      })
+
+    return () => {
+      mounted = false
+      ac.abort()
+    }
+  }, [user])
+
   if (!user) return null
 
-  const name = user?.name || user?.username || 'Admin User'
-  const email = user?.email || 'admin@movieapp.com'
+  const name = freshUser?.name || freshUser?.username || user?.name || user?.username || 'Admin User'
+  const email = freshUser?.email || user?.email || 'admin@movieapp.com'
   const initials = (name || 'A').split(' ').map(s => s[0]).slice(0,2).join('').toUpperCase()
 
   const doSignOut = async () => {
