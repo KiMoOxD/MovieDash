@@ -1,16 +1,27 @@
 // Settings.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import settingsApi from '../api/settings'
+import { useToast } from '../contexts/ToastContext'
+import { useAuth } from '../contexts/AuthContext'
 
 export default function Settings() {
-  // Mock state - replace with API or context later
+  const { user } = useAuth() || {}
+  const { addToast } = useToast()
+
   const [settings, setSettings] = useState({
-    applicationName: "Admin Dashboard",
-    adminEmail: "admin@movieapp.com",
+    applicationName: 'Admin Dashboard',
+    adminEmail: user?.email ?? 'admin@movieapp.com',
     emailNotifications: true,
-    currentPassword: "",
-    newPassword: "",
-    confirmPassword: ""
-  });
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: ''
+  })
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false)
+  const [showNewPassword, setShowNewPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [changingPwd, setChangingPwd] = useState(false)
 
   // Handlers
   const handleChange = (e) => {
@@ -21,25 +32,84 @@ export default function Settings() {
     }));
   };
 
-  const handleUpdatePassword = () => {
-    if (settings.newPassword !== settings.confirmPassword) {
-      alert("New passwords do not match!");
-      return;
-    }
-    // In real app: call API to update password
-    alert("Password updated successfully!");
-    setSettings(prev => ({
-      ...prev,
-      currentPassword: "",
-      newPassword: "",
-      confirmPassword: ""
-    }));
-  };
+  const togglePasswordVisibility = (setter) => {
+    setter(prev => !prev)
+  }
 
-  const handleSaveChanges = () => {
-    // In real app: call API to save all settings
-    alert("Settings saved successfully!");
-  };
+  const handleUpdatePassword = async () => {
+    if (settings.newPassword !== settings.confirmPassword) {
+      addToast('New passwords do not match!', { type: 'error' })
+      return
+    }
+    setChangingPwd(true)
+    try {
+      const userId = settingsApi.getUserIdFromToken() ?? user?.id ?? user?.userId ?? 0
+      const payload = {
+        userId: Number(userId) || 0,
+        oldPassword: settings.currentPassword,
+        newPassword: settings.newPassword,
+        confirmPassword: settings.confirmPassword,
+      }
+      await settingsApi.changePassword(payload)
+      addToast('Password updated successfully!', { type: 'success' })
+      setSettings((prev) => ({ ...prev, currentPassword: '', newPassword: '', confirmPassword: '' }))
+    } catch (err) {
+      const msg = err?.response?.data || err?.message || 'Change password failed'
+      addToast(typeof msg === 'string' ? msg : JSON.stringify(msg), { type: 'error' })
+    } finally {
+      setChangingPwd(false)
+    }
+  }
+
+  const handleSaveChanges = async () => {
+    setSaving(true)
+    try {
+      const payload = {
+        appName: settings.applicationName,
+        emailNotification: !!settings.emailNotifications,
+      }
+      await settingsApi.updateSettings(payload)
+      addToast('Settings saved successfully!', { type: 'success' })
+    } catch (err) {
+      const msg = err?.response?.data || err?.message || 'Save failed'
+      addToast(typeof msg === 'string' ? msg : JSON.stringify(msg), { type: 'error' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  useEffect(() => {
+    const ac = new AbortController()
+    let mounted = true
+    setLoading(true)
+    settingsApi
+      .getSettingData({ signal: ac.signal })
+      .then((res) => {
+        if (!mounted) return
+        const data = res?.data ?? res
+        setSettings((prev) => ({
+          ...prev,
+          applicationName: data.appName ?? prev.applicationName,
+          emailNotifications: typeof data.emailNotification === 'boolean' ? data.emailNotification : prev.emailNotifications,
+        }))
+      })
+      .catch((err) => {
+        if (axiosIsAbort(err)) return
+        const msg = err?.response?.data || err?.message || 'Failed to load settings'
+        addToast(typeof msg === 'string' ? msg : JSON.stringify(msg), { type: 'error' })
+      })
+      .finally(() => setLoading(false))
+
+    return () => {
+      mounted = false
+      ac.abort()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  function axiosIsAbort(err) {
+    return err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED'
+  }
 
   return (
     <div className="p-6">
@@ -86,20 +156,30 @@ export default function Settings() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Email Notifications</label>
             <p className="text-xs text-gray-500">Receive email notifications for new uploads</p>
           </div>
-          <div className="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
-            <input
-              type="checkbox"
-              name="emailNotifications"
-              checked={settings.emailNotifications}
-              onChange={handleChange}
-              className="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer"
-            />
-            <label
-              htmlFor="toggle"
-              className={`block overflow-hidden h-6 rounded-full cursor-pointer ${
-                settings.emailNotifications ? 'bg-gray-900' : 'bg-gray-300'
-              }`}
-            ></label>
+          <div className="flex items-center">
+            <label htmlFor="email-toggle" className="relative inline-flex items-center cursor-pointer">
+              <input
+                id="email-toggle"
+                type="checkbox"
+                name="emailNotifications"
+                className="sr-only"
+                checked={!!settings.emailNotifications}
+                onChange={(e) => setSettings((p) => ({ ...p, emailNotifications: e.target.checked }))}
+                aria-label="Enable email notifications"
+              />
+              <span
+                className={`w-12 h-7 flex items-center shrink-0 p-1 rounded-full transition-colors duration-200 ease-in-out ${
+                  settings.emailNotifications ? 'bg-indigo-600' : 'bg-gray-200'
+                }`}
+              >
+                <span
+                  className={`bg-white w-5 h-5 rounded-full shadow-md transform duration-200 ease-in-out ${
+                    settings.emailNotifications ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </span>
+            </label>
+            <span className="ml-3 text-sm text-gray-700">{settings.emailNotifications ? 'Enabled' : 'Disabled'}</span>
           </div>
         </div>
       </div>
@@ -109,42 +189,91 @@ export default function Settings() {
         <h2 className="text-lg font-semibold mb-1">Security</h2>
         <p className="text-sm text-gray-500 mb-4">Manage security settings</p>
         <div className="space-y-4">
-          <div>
+          <div className="relative">
             <label className="block text-sm font-medium text-gray-700 mb-1">Current Password</label>
             <input
-              type="password"
+              type={showCurrentPassword ? 'text' : 'password'}
               name="currentPassword"
               value={settings.currentPassword}
               onChange={handleChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
+            <button
+              type="button"
+              className="absolute right-3 top-1/2 flex items-center text-gray-400 hover:text-gray-600"
+              onClick={() => togglePasswordVisibility(setShowCurrentPassword)}
+            >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                {showCurrentPassword ? (
+                  <>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </>
+                ) : (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878L21 21" />
+                )}
+              </svg>
+            </button>
           </div>
-          <div>
+          <div className="relative">
             <label className="block text-sm font-medium text-gray-700 mb-1">New Password</label>
             <input
-              type="password"
+              type={showNewPassword ? 'text' : 'password'}
               name="newPassword"
               value={settings.newPassword}
               onChange={handleChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
+            <button
+              type="button"
+              className="absolute right-3 top-1/2 flex items-center text-gray-400 hover:text-gray-600"
+              onClick={() => togglePasswordVisibility(setShowNewPassword)}
+            >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                {showNewPassword ? (
+                  <>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </>
+                ) : (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878L21 21" />
+                )}
+              </svg>
+            </button>
           </div>
-          <div>
+          <div className="relative">
             <label className="block text-sm font-medium text-gray-700 mb-1">Confirm New Password</label>
             <input
-              type="password"
+              type={showConfirmPassword ? 'text' : 'password'}
               name="confirmPassword"
               value={settings.confirmPassword}
               onChange={handleChange}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
+            <button
+              type="button"
+              className="absolute right-3 top-1/2 flex items-center text-gray-400 hover:text-gray-600"
+              onClick={() => togglePasswordVisibility(setShowConfirmPassword)}
+            >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                {showConfirmPassword ? (
+                  <>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </>
+                ) : (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878L21 21" />
+                )}
+              </svg>
+            </button>
           </div>
           <div className="mt-4">
             <button
               onClick={handleUpdatePassword}
-              className="px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800"
+              disabled={changingPwd}
+              className="px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800 disabled:opacity-50"
             >
-              Update Password
+              {changingPwd ? 'Updating...' : 'Update Password'}
             </button>
           </div>
         </div>
@@ -160,9 +289,10 @@ export default function Settings() {
         </button>
         <button
           onClick={handleSaveChanges}
-          className="px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800"
+          disabled={saving}
+          className="px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800 disabled:opacity-50"
         >
-          Save Changes
+          {saving ? 'Saving...' : 'Save Changes'}
         </button>
       </div>
     </div>

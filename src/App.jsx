@@ -10,6 +10,7 @@ import Users from './pages/Users'
 import Subscriptions from './pages/Subscriptions'
 import UserSubscribtions from './pages/UserSubscribtions'
 import Settings from './pages/Settings'
+import Login from './pages/Login'
 import { ToastProvider } from './contexts/ToastContext'
 
 function App() {
@@ -17,6 +18,7 @@ function App() {
     <BrowserRouter>
       <ToastProvider>
         <Routes>
+          <Route path="/login" element={<Login />} />
           <Route path="/" element={<Layout />}>
             <Route index element={<Overview />} />
             <Route path="movies" element={<Movies />} />

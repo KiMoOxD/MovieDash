@@ -57,7 +57,8 @@ export default function Users() {
         userId: u.userId ?? u.id ?? u._id ?? null,
         name: u.name ?? '',
         email: u.email ?? '',
-        password: u.password ?? '',
+        // backend returns hashedPassword for stored password value
+        password: u.hashedPassword ?? u.password ?? '',
         role: u.role ?? '',
         isActive: typeof u.isActive === 'boolean' ? u.isActive : (u.status === 'Active'),
         createdAt: u.createdAt ?? u.createdAtDate ?? ''
@@ -153,7 +154,8 @@ export default function Users() {
     setFormData({
       name: user.name ?? '',
       email: user.email ?? '',
-      password: '', // don't prefill password
+      // prefill with backend password/hash when available
+      password: user.hashedPassword ?? user.password ?? '',
       role: user.role ?? '',
       isActive: Boolean(user.isActive)
     });

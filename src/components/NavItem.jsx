@@ -7,12 +7,12 @@ export default function NavItem({ path, icon, label }) {
       to={`/${path}`}
       className={({ isActive }) =>
         isActive
-          ? "flex items-center px-5 py-3 bg-gray-900 text-white rounded-md text-md"
-          : "flex items-center px-5 py-3 hover:bg-gray-100 rounded-md text-md"
+          ? "flex justify-center sm:justify-start items-center px-2 sm:px-5 py-3 bg-gray-900 text-white rounded-md text-md"
+          : "flex justify-center sm:justify-start items-center px-2 sm:px-5 py-3 hover:bg-gray-100 rounded-md text-md"
       }
     >
       {icon}
-      {label}
+      <span className='hidden sm:block'>{label}</span>
     </NavLink>
   );
 }

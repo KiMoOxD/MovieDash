@@ -22,7 +22,6 @@ export default function Series() {
     title: '',
     description: '',
     type: '',
-    url: 'https://example.com/series',
     posterURL: 'https://example.com/poster.jpg'
   });
 
@@ -81,7 +80,6 @@ export default function Series() {
         title: formData.title,
         description: formData.description,
         type: formData.type,
-        url: formData.url,
         posterURL: formData.posterURL,
       };
       await seriesApi.addSeries(payload);
@@ -105,7 +103,6 @@ export default function Series() {
         title: formData.title,
         description: formData.description,
         type: formData.type,
-        url: formData.url,
         posterURL: formData.posterURL,
       };
   await seriesApi.updateSeries(currentSeries.seriesId, payload);
@@ -142,7 +139,6 @@ export default function Series() {
       title: '',
       description: '',
       type: '',
-      url: 'https://example.com/series',
       posterURL: 'https://example.com/poster.jpg'
     });
   };
@@ -153,7 +149,6 @@ export default function Series() {
       title: seriesItem.title,
       description: seriesItem.description,
       type: seriesItem.type,
-      url: seriesItem.url,
       posterURL: seriesItem.posterURL ?? seriesItem.posterUrl ?? seriesItem.poster ?? ''
     });
     setIsEditModalOpen(true);
@@ -189,7 +184,6 @@ export default function Series() {
               <th className="px-3 py-3">Title</th>
               <th className="px-3 py-3">Description</th>
               <th className="px-3 py-3">Type</th>
-              <th className="px-3 py-3">URL</th>
               <th className="px-3 py-3">Poster</th>
               <th className="px-3 py-3">Actions</th>
             </tr>
@@ -197,7 +191,7 @@ export default function Series() {
           <tbody className="divide-y divide-gray-200">
             {loading ? (
               <tr>
-                <td colSpan={7} className="py-12 text-center">
+                <td colSpan={6} className="py-12 text-center">
                   <svg className="animate-spin h-6 w-6 mx-auto text-gray-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
@@ -212,7 +206,6 @@ export default function Series() {
                   <td className="px-3 py-4 text-xs">{seriesItem.title}</td>
                   <td className="px-3 py-4 text-xs truncate max-w-xs">{seriesItem.description}</td>
                   <td className="px-3 py-4 text-xs">{seriesItem.type}</td>
-                  <td className="px-3 py-4 text-xs truncate max-w-xs">{seriesItem.url}</td>
                   <td className="px-3 py-4 text-xs truncate max-w-xs">{seriesItem.posterURL}</td>
                   <td className="px-3 py-4 text-xs">
                     <div className="flex space-x-2">
@@ -276,16 +269,7 @@ export default function Series() {
               placeholder="e.g., Drama, Comedy, Fantasy"
             />
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">URL</label>
-            <input
-              type="text"
-              value={formData.url}
-              onChange={(e) => setFormData({...formData, url: e.target.value})}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="https://example.com/series"
-            />
-          </div>
+          {/* URL removed from Add modal by request */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Poster URL</label>
             <input
@@ -358,15 +342,7 @@ export default function Series() {
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">URL</label>
-            <input
-              type="text"
-              value={formData.url}
-              onChange={(e) => setFormData({...formData, url: e.target.value})}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
+          {/* URL removed from Edit modal by request */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Poster URL</label>
             <input
